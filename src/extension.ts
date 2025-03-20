@@ -33,43 +33,105 @@ function refactorToLambdaFunc() {
 	if (!editor) return;
 
 	const selection = editor.selection;
-	const functionName = editor.document.getText(selection).trim();
-
-	if (!functionName) {
-		vscode.window.showErrorMessage('Please select a function name to refactor.');
+	const functionCall = editor.document.getText(selection).trim();
+	if (!functionCall) {
+		vscode.window.showErrorMessage('Please select a function call to refactor.');
 		return;
 	}
-	else {
-		const codeText = getFunctionCode(functionName);
-		vscode.window.showInformationMessage(`Refactoring function ${functionName} to lambda function.`);
-		const lambdaCode = `[] ${codeText?.functionCall} { ${codeText?.functionInnerCode} }`;
-		// editor.edit(editBuilder => {
-		// 	editBuilder.replace(selection, lambdaCode);
-		// });
-		// print debug
-		console.log(lambdaCode);
+
+	const baseIndent = ((editor) => {
+		const position = editor.document.positionAt(editor.document.offsetAt(selection.start));
+		const line = editor.document.lineAt(position.line);
+		console.log("line:" + line.text);
+		return line.text.match(/^\s*/)?.[0] || '';
+	})(editor);
+	// print indent
+	console.log("s" + baseIndent + "e");
+
+	// find function name, open ( and close )
+	const functionName = functionCall.slice(0, functionCall.indexOf('(')).trim();
+	if (!functionName) {
+		vscode.window.showErrorMessage('Function name not found.');
+		return;
 	}
+	const openParenthesis = functionCall.indexOf('(');
+	const closeParenthesis = functionCall.indexOf(')');
+	if(openParenthesis === -1 || closeParenthesis === -1) {
+		vscode.window.showErrorMessage('Invalid function call.');
+		return;
+	}
+	const parameters = functionCall.slice(openParenthesis + 1, closeParenthesis).trim();
+
+	const lambdaExp = buildCppLambdaExp(functionName, parameters, baseIndent);
+	if(!lambdaExp) return;
+	vscode.window.showInformationMessage(`Refactoring function ${functionName} to lambda function.`);;
+	editor.edit(editBuilder => {
+		editBuilder.replace(selection, lambdaExp);
+	});
+	// print debug
+	// console.log(lambdaExp);
 }
 
-function getFunctionCode(functionName: string) {
-	const editor = vscode.window.activeTextEditor;
-	if (!editor) return;
+function buildCppLambdaExp(functionName: string, parameters: string, baseIndent: string) {
+	
+	const text = (() => {
+		const editor = vscode.window.activeTextEditor;
+		if (!editor) return null;
+		return editor.document.getText();
+	})();
+	if(!text) return null;
 
-	const document = editor.document;
-	const text = document.getText();
-	const functionRegex = new RegExp(`\\b${functionName}\\s*\\(`, 'g');
+	const block = extractFunctionBlock(text, functionName, baseIndent);
+	if(!block) return null;
+
+	return `[] ${block.definition} ${block.indentedFunctionCode}(${parameters});`;
+}
+
+function extractFunctionBlock(text: string, functionName: string, baseIndent: string) {
+	const functionRegex = new RegExp(`\\b${functionName}\\b[^\\{]*\\{`, 'm');
 	const functionStart = text.search(functionRegex);
 	if (functionStart === -1) {
 		vscode.window.showErrorMessage(`Function ${functionName} not found.`);
 		return;
 	}
-	const functionDefinitionEnd = text.indexOf('{', functionStart);
-	const functionEnd = text.indexOf('}', functionStart);
 
-	const functionCall = text.slice(functionStart, functionDefinitionEnd - 1);
-	const functionInnerCode = text.slice(functionDefinitionEnd + 1, functionEnd - 1);
-	return {functionCall, functionInnerCode};
+	const editor = vscode.window.activeTextEditor;
+	if (!editor) return null;
+	
+	const definition = ((text: string, functionStart: number) => {
+		const functionDefinitionStart = text.indexOf('(', functionStart);
+		const functionDefinitionEnd = text.indexOf(')', functionStart);
+		return text.slice(functionDefinitionStart, functionDefinitionEnd + 1);
+	})(text, functionStart);
+
+	// Use a stack to get the entire function block, including the enclosing braces
+	let functionCode = ((text: string, functionStart: number) => {
+		let braceIdx = text.indexOf('{', functionStart);
+		if (braceIdx === -1) return null;
+	
+		let stack = ['{'];
+		let i = braceIdx + 1;
+	
+		while (i < text.length && stack.length > 0) {
+		if (text[i] === '{') stack.push('{');
+			else if (text[i] === '}') stack.pop();
+			i++;
+		}
+	
+		if (stack.length === 0) {
+		// 'i' is now right after the matching closing brace
+			return text.substring(braceIdx, i);
+		}
+		return null;
+	})(text, functionStart);
+
+	const indentedFunctionCode = functionCode?.split('\n').map((line, idx) => idx === 0 ? line : baseIndent + line).join('\n');
+	// print functionCode and indentedFunctionCode
+	console.log(functionCode);
+	console.log(indentedFunctionCode);
+	return {definition, indentedFunctionCode};
 }
+  
 
 // This method is called when your extension is deactivated
 export function deactivate() {}
