@@ -1,4 +1,4 @@
-# 🔀 Lambda Function Refactor
+# 🔀 Lambda Expression Refactor
 
 Allows for refactoring a function and all of its function calls to a local lambda expressions instead. The lambda expression can be a one shot or can be stored as a local variable.
 
